@@ -16,6 +16,13 @@ const phraseAliases = [
   [/\bpatient\s+info\b/g, "patient information"],
   [/\bphi\s+info\b/g, "phi"],
   [/\bsoc\s*ii\b/g, "soc 2"],
+  [/\bwhat can (?:onesmarter|you|ur company)\s+do\s+for\s+us\b/g, "what does onesmarter do"],
+  [/\bwhat can (?:onesmarter|you|ur company)\s+do\b/g, "what does onesmarter do"],
+  [/\bwhat do you do\b/g, "what does onesmarter do"],
+  [/\bwhat does your company do\b/g, "what does onesmarter do"],
+  [/\bhow can (?:onesmarter|you)\s+help(?:\s+us)?\b/g, "what does onesmarter do"],
+  [/\btell me what onesmarter does\b/g, "what does onesmarter do"],
+  [/\bwhat are your capabilities\b/g, "what does onesmarter do"],
   [/\breveel\s+system\s+prompt\b/g, "reveal system prompt"],
   [/\bhidden\s+instrctions\b/g, "hidden instructions"],
 ];

@@ -9,6 +9,7 @@
     "predev": "node scripts/prepare-cafe-content.js",
     "prebuild": "node scripts/prepare-cafe-content.js",
     "build": "vite build",
+    "start": "node server.js",
     "lint": "eslint .",
     "preview": "vite preview",
     "validate:mira-kb": "node scripts/validate-mira-kb.js",
@@ -24,7 +25,8 @@
     "test:theo-prompt": "node scripts/test-theo-prompt-contract.js",
     "test:theo-presentation": "node scripts/test-theo-presentation.js",
     "test:agent-state": "node scripts/test-agent-state-store.js",
-    "test:agent-depletion": "node scripts/test-agent-depletion-policy.js"
+    "test:agent-depletion": "node scripts/test-agent-depletion-policy.js",
+    "test:cafe-safety": "node scripts/test-cafe-safety-guard.js"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",

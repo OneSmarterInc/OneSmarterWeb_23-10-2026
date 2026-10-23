@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: onesmarter-web
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - MIRA_LLM_MODE=${MIRA_LLM_MODE:-staging_llm}
+      - MIRA_LLM_PROVIDER=${MIRA_LLM_PROVIDER:-ollama}
+      - MIRA_LLM_MODEL=${MIRA_LLM_MODEL:-qwen2.5:0.5b}
+      - CAFE_OLLAMA_MODEL=${CAFE_OLLAMA_MODEL:-qwen2.5:0.5b}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - CAFE_OLLAMA_BASE_URL=${CAFE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    extra_hosts:
+      # Allows the container to communicate with Ollama or services running on the host machine
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Uncomment or run with '--profile with-ollama' if you want a dedicated Ollama container
+  ollama:
+    image: ollama/ollama:latest
+    container_name: onesmarter-ollama
+    profiles:
+      - with-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

@@ -1,0 +1,21 @@
+services:
+  dev:
+    image: node:20-alpine
+    container_name: onesmarter-web-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - MIRA_LLM_MODE=${MIRA_LLM_MODE:-staging_llm}
+      - MIRA_LLM_PROVIDER=${MIRA_LLM_PROVIDER:-ollama}
+      - MIRA_LLM_MODEL=${MIRA_LLM_MODEL:-qwen2.5:0.5b}
+      - CAFE_OLLAMA_MODEL=${CAFE_OLLAMA_MODEL:-qwen2.5:0.5b}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - CAFE_OLLAMA_BASE_URL=${CAFE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"

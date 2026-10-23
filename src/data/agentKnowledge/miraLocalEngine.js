@@ -258,11 +258,13 @@ export const scoreKbEntry = (question, entry) => {
   }
 
   if (
-    /\bonesmarter\b/.test(normalized) &&
-    /\b(what does|what is|who is|tell me about)\b/.test(normalized)
+    (/\bonesmarter\b/.test(normalized) || /\b(you|your company|your business|ur company)\b/.test(normalized)) &&
+    (/\b(what (?:can|does|do|is|are)|who (?:is|are)|tell me|how can|how do|capabilities|overview|specialize|what all)\b/.test(normalized) ||
+     /\b(what do you do|what you do|what does onesmarter do|how can you help|what can onesmarter do|what can you do|what services do you|what services does onesmarter)\b/.test(normalized))
   ) {
-    if (entry.id === "company-overview") score += 10;
+    if (entry.id === "company-overview") score += 12;
   }
+
 
   if (/\bhipaa\b/.test(normalized)) {
     if (entry.id === "hipaa-security-rule-assessment") score += 8;

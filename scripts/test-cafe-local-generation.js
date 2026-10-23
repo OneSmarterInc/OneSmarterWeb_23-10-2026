@@ -44,7 +44,7 @@ const server = http.createServer(async (request, response) => {
   if (request.url === "/api/show") {
     response.end(JSON.stringify(mode === "remote"
       ? { remote_model: "remote", remote_host: "https://example.com" }
-      : { model_info: { "general.architecture": "qwen3" } }));
+      : { model_info: { "general.architecture": "qwen2" } }));
     return;
   }
   response.end(JSON.stringify({
@@ -80,19 +80,19 @@ const rejectWithoutSaving = async (pattern, customEnv = env) => {
 try {
   await check("local defaults and configuration boundaries", async () => {
     assert.deepEqual(readCafeOllamaConfig({}), {
-      baseUrl: "http://127.0.0.1:11434", model: "qwen3:4b", timeoutMs: 120000,
+      baseUrl: "http://127.0.0.1:11434", model: "qwen2.5:0.5b", timeoutMs: 120000,
     });
     for (const url of ["https://example.com", "http://192.168.1.2:11434", "http://user:pass@localhost:11434", "http://localhost:11434/api"]) {
       assert.throws(() => readCafeOllamaConfig({ CAFE_OLLAMA_BASE_URL: url }), /loopback/);
     }
-    assert.throws(() => readCafeOllamaConfig({ CAFE_OLLAMA_MODEL: "qwen3:cloud" }), /cloud/);
+    assert.throws(() => readCafeOllamaConfig({ CAFE_OLLAMA_MODEL: "qwen2.5:cloud" }), /cloud/);
     assert.throws(() => readCafeOllamaConfig({ CAFE_GENERATION_TIMEOUT_MS: "NaN" }), /integer/);
   });
   await check("valid JSON saves an unpublished draft with verifiable metadata", async () => {
     const draftPath = await generateConversation(inputs, { env, outputDirectory });
     const draft = JSON.parse(await fs.readFile(draftPath, "utf8"));
     assert.equal(draft.id, draft.draftId);
-    assert.equal(draft.model, "qwen3:4b");
+    assert.equal(draft.model, "qwen2.5:0.5b");
     assert.equal(draft.status, "unpublished");
     assert.equal(draft.reviewedBy, undefined);
     assert.equal(draft.createdAt, draft.generatedAt);
@@ -106,7 +106,7 @@ try {
     const chat = requests.find(({ route }) => route === "/api/chat");
     assert.equal(chat.body.stream, false);
     assert.equal(chat.body.think, false);
-    assert.equal(chat.body.model, "qwen3:4b");
+    assert.equal(chat.body.model, "qwen2.5:0.5b");
     assert.equal(chat.headers.authorization, undefined);
     assert.deepEqual(chat.body.format.properties.exchanges.items.properties.speaker.enum, inputs.participantIds);
     assert.ok(chat.body.messages[0].content.includes(inputs.seedTopic));

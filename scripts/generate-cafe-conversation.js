@@ -288,7 +288,7 @@ export const buildCafeDraft = ({
   exchanges,
   invitedBy,
   selection,
-  model = "qwen3:4b",
+  model = "qwen2.5:0.5b",
 }) => {
   if (conversationDay !== undefined && !validDay(conversationDay)) throw new Error("Invalid Cafe conversation day.");
   const draftId = `cafe-draft-${randomUUID()}`;

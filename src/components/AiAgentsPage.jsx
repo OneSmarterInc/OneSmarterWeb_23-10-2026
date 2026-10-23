@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatMiraAnswerBlocks as formatStructuredMiraAnswerBlocks } from "../data/agentPresentation/miraAnswerFormatter.js";
 import { cafePersonas } from "../data/agentPresentation/cafePersonas.js";
 import { getEarlierCafeConversations, getCafeWeekBucket, isCafeConversationActive, selectCafeConversation } from "../data/cafeConversations/index.js";
 import MiraPageReview from "./MiraPageReview.jsx";
+import CafeConversationGenerator from "./CafeConversationGenerator.jsx";
+import { Sparkles, CheckCheck, Coffee, Copy, Check, Send, Loader2, AtSign, Play, SkipForward } from "lucide-react";
 
 const conversationExamples = [
   {
@@ -327,53 +329,838 @@ const MiraAnswerContent = ({ content, structure }) =>
     <MiraFallbackAnswerContent content={content} />
   );
 
+const PERSONA_CHAT_METADATA = {
+  "theo-mercer": {
+    initials: "TM",
+    badgeColor: "bg-slate-700 text-slate-100 border-slate-500",
+    nameColor: "text-sky-300",
+    role: "Reserved & precise",
+  },
+  "elena-cross": {
+    initials: "EC",
+    badgeColor: "bg-amber-600/90 text-amber-50 border-amber-400",
+    nameColor: "text-amber-300",
+    role: "Witty & observant",
+  },
+  "ravi-sen": {
+    initials: "RS",
+    badgeColor: "bg-emerald-700 text-emerald-50 border-emerald-500",
+    nameColor: "text-emerald-300",
+    role: "Tactical & discursive",
+  },
+  "selene-hart": {
+    initials: "SH",
+    badgeColor: "bg-indigo-700 text-indigo-50 border-indigo-400",
+    nameColor: "text-indigo-300",
+    role: "Reflective & questioning",
+  },
+};
+
+const getPersonaChatMeta = (id, fallbackName = "") => {
+  if (PERSONA_CHAT_METADATA[id]) return PERSONA_CHAT_METADATA[id];
+  const initials = fallbackName
+    ? fallbackName
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "AI";
+  return {
+    initials,
+    badgeColor: "bg-zinc-700 text-zinc-200 border-zinc-600",
+    nameColor: "text-red-300",
+    role: "AI Agent",
+  };
+};
+
+const getLiveFormattedTime = (date) => {
+  const d = date instanceof Date ? date : date ? new Date(date) : new Date();
+  return d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+const renderTextWithMentions = (text) => {
+  if (typeof text !== "string") return "";
+  const parts = text.split(/(@[A-Za-z]+(?:\s[A-Za-z]+)?)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("@")) {
+      return (
+        <span
+          key={index}
+          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold bg-red-500/20 text-red-200 border border-red-400/40 shadow-sm"
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+};
+
 const CafeConversationTranscript = ({ conversation, personaNames }) => {
+  const [copied, setCopied] = useState(false);
+  const [localExchanges, setLocalExchanges] = useState(
+    conversation?.exchanges || [],
+  );
+  const [visitorInput, setVisitorInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendingStatusText, setSendingStatusText] = useState("");
+  const [replyError, setReplyError] = useState("");
+  const [showTagMenu, setShowTagMenu] = useState(false);
+
+  // Live creation / simulation state
+  const [isLiveCreating, setIsLiveCreating] = useState(false);
+  const [liveIndex, setLiveIndex] = useState(0);
+  const [currentlyTypingSpeaker, setCurrentlyTypingSpeaker] = useState(null);
+  const liveTimerRef = useRef(null);
+
+  const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+  const tagMenuRef = useRef(null);
+
+  const allSourceExchanges = useMemo(
+    () => conversation?.exchanges || [],
+    [conversation],
+  );
+
+  const participants = conversation?.participants || [];
+  const speakerAId =
+    participants[0] || allSourceExchanges[0]?.speaker || "";
+  const speakerBId =
+    participants[1] ||
+    allSourceExchanges.find((e) => e.speaker !== speakerAId)?.speaker ||
+    "";
+
+  const speakerAName = personaNames[speakerAId] || speakerAId || "Agent 1";
+  const speakerBName = personaNames[speakerBId] || speakerBId || "Agent 2";
+  const metaA = getPersonaChatMeta(speakerAId, speakerAName);
+  const metaB = getPersonaChatMeta(speakerBId, speakerBName);
+
+  const availableAgents = cafePersonas.map((p) => ({
+    id: p.id,
+    name: p.name,
+    firstName: p.name.split(" ")[0],
+    isAtTable: p.id === speakerAId || p.id === speakerBId,
+    meta: getPersonaChatMeta(p.id, p.name),
+  }));
+
+  const startLiveCreation = useCallback(() => {
+    if (!allSourceExchanges.length) return;
+    clearTimeout(liveTimerRef.current);
+    setIsLiveCreating(true);
+    setLocalExchanges([allSourceExchanges[0]]);
+    setLiveIndex(1);
+  }, [allSourceExchanges]);
+
+  const skipLiveCreation = useCallback(() => {
+    clearTimeout(liveTimerRef.current);
+    setIsLiveCreating(false);
+    setCurrentlyTypingSpeaker(null);
+    setLocalExchanges(allSourceExchanges);
+  }, [allSourceExchanges]);
+
+  // Sync conversation changes or trigger live generation on new creation
+  useEffect(() => {
+    clearTimeout(liveTimerRef.current);
+    setVisitorInput("");
+    setReplyError("");
+    setShowTagMenu(false);
+
+    if (conversation?.isNewlyGenerated && allSourceExchanges.length > 1) {
+      startLiveCreation();
+    } else {
+      setIsLiveCreating(false);
+      setCurrentlyTypingSpeaker(null);
+      setLocalExchanges(allSourceExchanges);
+    }
+
+    return () => clearTimeout(liveTimerRef.current);
+  }, [conversation?.id, conversation?.isNewlyGenerated, allSourceExchanges, startLiveCreation]);
+
+  // Handle live turn-by-turn progressive reveal
+  useEffect(() => {
+    if (isLiveCreating && liveIndex < allSourceExchanges.length) {
+      const nextTurn = allSourceExchanges[liveIndex];
+      setCurrentlyTypingSpeaker(nextTurn.speaker);
+
+      liveTimerRef.current = setTimeout(() => {
+        setLocalExchanges((prev) => [...prev, nextTurn]);
+        setCurrentlyTypingSpeaker(null);
+        setLiveIndex((prev) => prev + 1);
+      }, 2200);
+    } else if (isLiveCreating && liveIndex >= allSourceExchanges.length) {
+      setIsLiveCreating(false);
+      setCurrentlyTypingSpeaker(null);
+    }
+
+    return () => clearTimeout(liveTimerRef.current);
+  }, [isLiveCreating, liveIndex, allSourceExchanges]);
+
+  if (!conversation) return null;
+
   const inviterName = conversation.invitedBy
-    ? personaNames[conversation.invitedBy]
+    ? personaNames[conversation.invitedBy] || conversation.invitedBy
     : "";
   const invitedParticipantName = conversation.invitedBy
     ? personaNames[
-        conversation.participants.find(
+        conversation.participants?.find(
           (participantId) => participantId !== conversation.invitedBy,
         )
-      ]
+      ] || ""
     : "";
 
+  const isLiveGenerated =
+    conversation.status === "unpublished" || Boolean(conversation.draftId);
+  const rawDate =
+    conversation.publishedAt ||
+    conversation.conversationDay ||
+    conversation.generatedAt?.slice(0, 10);
+  const formattedDate = rawDate
+    ? new Date(`${rawDate}T00:00:00`).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
+
+  const getExchangeTime = (exchange, index) => {
+    if (exchange.liveTime) return exchange.liveTime;
+    // Compute progressive live time relative to now
+    const now = new Date();
+    const minutesAgo = (localExchanges.length - 1 - index) * 2;
+    const msgDate = new Date(now.getTime() - minutesAgo * 60000);
+    return getLiveFormattedTime(msgDate);
+  };
+
+  const handleCopyTranscript = async () => {
+    if (!localExchanges.length) return;
+    const transcriptText = localExchanges
+      .map((e) => {
+        const name =
+          e.speaker === "visitor"
+            ? "You"
+            : personaNames[e.speaker] || e.speaker;
+        return `${name}: ${e.text}`;
+      })
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(transcriptText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback if clipboard API is restricted
+    }
+  };
+
+  const handleTagAgent = (agentName) => {
+    const mentionText = `@${agentName} `;
+    setVisitorInput((prev) => {
+      if (prev.endsWith("@")) {
+        return prev.slice(0, -1) + mentionText;
+      }
+      if (!prev || prev.endsWith(" ")) {
+        return prev + mentionText;
+      }
+      return prev + " " + mentionText;
+    });
+    setShowTagMenu(false);
+    inputRef.current?.focus();
+  };
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setVisitorInput(val);
+
+    if (val.endsWith("@") || val.endsWith("@ ")) {
+      setShowTagMenu(true);
+    }
+  };
+
+  const handleSendOpinion = async (e) => {
+    if (e) e.preventDefault();
+    const trimmed = visitorInput.trim();
+    if (!trimmed || isSending) return;
+
+    // Pause/halt scripted replay when visitor joins live
+    if (isLiveCreating) {
+      clearTimeout(liveTimerRef.current);
+      setIsLiveCreating(false);
+      setCurrentlyTypingSpeaker(null);
+    }
+
+    setReplyError("");
+    setShowTagMenu(false);
+    const userExchange = {
+      speaker: "visitor",
+      text: trimmed,
+      liveTime: getLiveFormattedTime(new Date()),
+    };
+
+    const lowerTrimmed = trimmed.toLowerCase();
+    let indicatorText = `${speakerAName} and ${speakerBName} are discussing your message...`;
+    if (/@(?:all|everyone|agents)\b/i.test(lowerTrimmed)) {
+      indicatorText = "All agents are preparing responses...";
+    } else {
+      const tagged = cafePersonas.filter(
+        (p) =>
+          lowerTrimmed.includes(`@${p.name.toLowerCase()}`) ||
+          lowerTrimmed.includes(`@${p.name.split(" ")[0].toLowerCase()}`) ||
+          lowerTrimmed.includes(`@${p.id.toLowerCase()}`),
+      );
+      if (tagged.length === 1) {
+        indicatorText = `${tagged[0].name} is replying...`;
+      } else if (tagged.length > 1) {
+        indicatorText = `${tagged.map((p) => p.name).join(" and ")} are replying...`;
+      }
+    }
+    setSendingStatusText(indicatorText);
+
+    const updatedList = [...localExchanges, userExchange];
+    setLocalExchanges(updatedList);
+    setVisitorInput("");
+    setIsSending(true);
+
+    try {
+      const res = await fetch("/api/agents/cafe/reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          participantIds: conversation.participants || [speakerAId, speakerBId],
+          seedTopic: conversation.seedTopic || "everyday observations",
+          recentExchanges: updatedList,
+          visitorMessage: trimmed,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success || !Array.isArray(data.replies)) {
+        throw new Error(
+          data.message || "Failed to receive replies from agents.",
+        );
+      }
+
+      const repliesWithTime = data.replies.map((reply, rIdx) => ({
+        ...reply,
+        liveTime: getLiveFormattedTime(new Date(Date.now() + (rIdx + 1) * 30000)),
+      }));
+
+      setLocalExchanges((prev) => [...prev, ...repliesWithTime]);
+    } catch (err) {
+      setReplyError(
+        err.message ||
+          "Could not get agent response. Please check local Ollama.",
+      );
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   return (
-    <article className="rounded-lg border border-white/10 bg-black/30 p-5 md:p-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white md:text-xl">
-          {conversation.participants
-            .map((participantId) => personaNames[participantId])
-            .join(" and ")}
-        </h3>
-        <time className="text-sm text-zinc-400" dateTime={conversation.publishedAt}>
-          {new Date(`${conversation.publishedAt}T00:00:00`).toLocaleDateString(
-            "en-US",
-            { year: "numeric", month: "long", day: "numeric" },
-          )}
-        </time>
-      </div>
-      {inviterName && invitedParticipantName && (
-        <p className="mt-3 text-sm italic text-zinc-400">
-          {inviterName} invited {invitedParticipantName} to the Café.
-        </p>
-      )}
-      <ol className="mt-6 space-y-4">
-        {conversation.exchanges.map((exchange, exchangeIndex) => (
-          <li
-            key={`${conversation.id}-${exchangeIndex}`}
-            className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4"
-          >
-            <span className="font-semibold text-red-300">
-              {personaNames[exchange.speaker]}
+    <article className="overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e12] shadow-2xl shadow-red-950/25 transition">
+      {/* OneSmarter Themed Chat Header */}
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#141418] px-4 py-3 sm:px-6 sm:py-3.5">
+        <div className="flex items-center gap-3">
+          {/* Overlapping Agent Avatars */}
+          <div className="relative flex items-center" aria-hidden="true">
+            <span
+              className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-bold shadow-md ${metaA.badgeColor}`}
+            >
+              {metaA.initials}
             </span>
-            <p className="min-w-0 break-words leading-7 text-zinc-200">
-              {exchange.text}
+            <span
+              className={`-ml-2.5 flex h-9 w-9 items-center justify-center rounded-full border text-xs font-bold shadow-md ${metaB.badgeColor}`}
+            >
+              {metaB.initials}
+            </span>
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-[#141418] bg-red-500"></span>
+            </span>
+          </div>
+
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-white sm:text-base">
+                {speakerAName} and {speakerBName}
+              </h3>
+              {isLiveCreating ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/20 px-2.5 py-0.5 text-[10px] font-semibold text-red-200 animate-pulse">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-ping" />
+                  Live Generation Active
+                </span>
+              ) : isLiveGenerated ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
+                  <Sparkles className="h-2.5 w-2.5 text-amber-300" />
+                  Live Generated Chat
+                </span>
+              ) : null}
+            </div>
+            <p className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400"></span>
+              <span>The Café • Interactive character discussion</span>
             </p>
-          </li>
-        ))}
-      </ol>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Live Replay / Skip Toggle */}
+          {allSourceExchanges.length > 1 && (
+            <button
+              type="button"
+              onClick={isLiveCreating ? skipLiveCreation : startLiveCreation}
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-200 transition hover:bg-red-500/20 active:scale-95"
+            >
+              {isLiveCreating ? (
+                <>
+                  <SkipForward className="h-3 w-3 text-red-300" />
+                  <span>Skip to full chat</span>
+                </>
+              ) : (
+                <>
+                  <Play className="h-3 w-3 text-red-300" />
+                  <span>Live replay</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {formattedDate && (
+            <time
+              className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-400"
+              dateTime={rawDate}
+            >
+              {formattedDate}
+            </time>
+          )}
+
+          <button
+            type="button"
+            onClick={handleCopyTranscript}
+            aria-label="Copy transcript"
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-300 transition hover:border-white/25 hover:bg-white/[0.08]"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-red-400" />
+                <span className="text-red-300">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* Chat canvas body with OneSmarter Obsidian styling */}
+      <div className="relative p-4 sm:p-6 md:p-8">
+        {/* Date pill */}
+        {formattedDate && (
+          <div className="mb-4 flex justify-center">
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400 shadow-sm">
+              {formattedDate}
+            </span>
+          </div>
+        )}
+
+        {/* System discussion topic bubble */}
+        {conversation.seedTopic && (
+          <div className="mx-auto mb-6 max-w-lg rounded-xl border border-red-500/25 bg-red-950/20 px-4 py-2.5 text-center shadow-sm">
+            <p className="text-xs text-rose-200">
+              <span className="font-semibold text-red-400">Discussion topic: </span>
+              <span className="italic text-zinc-100">“{conversation.seedTopic}”</span>
+            </p>
+            {inviterName && invitedParticipantName && (
+              <p className="mt-1 text-[11px] italic text-zinc-400">
+                {inviterName} invited {invitedParticipantName} to the Café.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Messages List: OneSmarter Obsidian & Crimson Alternating Bubbles */}
+        <div
+          className="space-y-4"
+          role="log"
+          aria-label="Café conversation exchanges"
+        >
+          {localExchanges.map((exchange, exchangeIndex) => {
+            const isVisitor = exchange.speaker === "visitor";
+            const isLeftSpeaker = exchange.speaker === speakerAId;
+            const currentSpeakerName = isVisitor
+              ? "You"
+              : personaNames[exchange.speaker] || exchange.speaker;
+            const currentMeta = isVisitor
+              ? {
+                  initials: "YOU",
+                  badgeColor: "bg-red-700 text-white border-red-400",
+                  nameColor: "text-rose-100",
+                  role: "Visitor at Table",
+                }
+              : getPersonaChatMeta(exchange.speaker, currentSpeakerName);
+
+            const displayTime = getExchangeTime(exchange, exchangeIndex);
+
+            // Case 1: Visitor / You (User opinion sent into the chat)
+            if (isVisitor) {
+              return (
+                <div
+                  key={`${conversation.id}-turn-${exchangeIndex}`}
+                  className="group flex items-end justify-end gap-2.5 sm:gap-3"
+                >
+                  {/* User Bubble - OneSmarter Crimson Gradient */}
+                  <div className="relative max-w-[85%] rounded-2xl rounded-br-xs border border-red-400/50 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-3.5 text-white shadow-xl shadow-red-950/40 sm:max-w-[78%] sm:p-4 md:max-w-[70%]">
+                    {/* Header */}
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-red-400/30 pb-1">
+                      <span className="text-xs font-semibold tracking-wide text-white sm:text-[13px]">
+                        You (Visitor)
+                      </span>
+                      <span className="text-[10px] font-medium text-rose-100/90">
+                        Joined conversation
+                      </span>
+                    </div>
+
+                    {/* Content with mention badges */}
+                    <p className="min-w-0 break-words text-sm leading-relaxed text-white whitespace-pre-wrap sm:text-[14.5px]">
+                      {renderTextWithMentions(exchange.text)}
+                    </p>
+
+                    {/* Footer with real live time */}
+                    <div className="mt-2 flex items-center justify-end gap-1.5 text-[10px] text-rose-100/90">
+                      <span>Turn {exchangeIndex + 1}</span>
+                      <span>•</span>
+                      <span>{displayTime}</span>
+                      <CheckCheck
+                        className="inline h-3.5 w-3.5 text-white"
+                        aria-label="Delivered"
+                      />
+                    </div>
+                  </div>
+
+                  {/* User Avatar */}
+                  <div
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-400 bg-red-600 text-xs font-bold text-white shadow-lg sm:h-9 sm:w-9"
+                    title="You (Visitor)"
+                    aria-hidden="true"
+                  >
+                    YOU
+                  </div>
+                </div>
+              );
+            }
+
+            // Case 2: Agent 1 (Left-aligned bubble - OneSmarter Obsidian Card)
+            if (isLeftSpeaker) {
+              return (
+                <div
+                  key={`${conversation.id}-turn-${exchangeIndex}`}
+                  className="group flex items-end justify-start gap-2.5 sm:gap-3"
+                >
+                  {/* Left Avatar */}
+                  <div
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold shadow-md sm:h-9 sm:w-9 ${currentMeta.badgeColor}`}
+                    title={`${currentSpeakerName} (${currentMeta.role})`}
+                    aria-hidden="true"
+                  >
+                    {currentMeta.initials}
+                  </div>
+
+                  {/* Left Bubble */}
+                  <div className="relative max-w-[85%] rounded-2xl rounded-bl-xs border border-white/10 bg-[#16161c] p-3.5 text-zinc-100 shadow-lg backdrop-blur-sm transition-all hover:border-white/20 sm:max-w-[78%] sm:p-4 md:max-w-[70%]">
+                    {/* Header */}
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-white/5 pb-1">
+                      <span
+                        className={`text-xs font-semibold tracking-wide sm:text-[13px] ${currentMeta.nameColor}`}
+                      >
+                        {currentSpeakerName}
+                      </span>
+                      <span className="text-[10px] font-medium text-zinc-400">
+                        {currentMeta.role}
+                      </span>
+                    </div>
+
+                    {/* Content with mention badges */}
+                    <p className="min-w-0 break-words text-sm leading-relaxed text-zinc-100 whitespace-pre-wrap sm:text-[14.5px]">
+                      {renderTextWithMentions(exchange.text)}
+                    </p>
+
+                    {/* Footer with real live time */}
+                    <div className="mt-2 flex items-center justify-end gap-1.5 text-[10px] text-zinc-500">
+                      <span>Turn {exchangeIndex + 1}</span>
+                      <span>•</span>
+                      <span>{displayTime}</span>
+                      <CheckCheck
+                        className="h-3 w-3 text-zinc-500"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Case 3: Agent 2 (Right-aligned bubble - OneSmarter Dark Wine Card)
+            return (
+              <div
+                key={`${conversation.id}-turn-${exchangeIndex}`}
+                className="group flex items-end justify-end gap-2.5 sm:gap-3"
+              >
+                {/* Right Bubble */}
+                <div className="relative max-w-[85%] rounded-2xl rounded-br-xs border border-red-500/35 bg-gradient-to-br from-[#2a0e14]/95 via-[#1e0a0f]/95 to-[#15070a]/95 p-3.5 text-rose-50 shadow-lg backdrop-blur-sm transition-all hover:border-red-400/50 sm:max-w-[78%] sm:p-4 md:max-w-[70%]">
+                  {/* Header */}
+                  <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-red-500/20 pb-1">
+                    <span
+                      className={`text-xs font-semibold tracking-wide sm:text-[13px] ${currentMeta.nameColor}`}
+                    >
+                      {currentSpeakerName}
+                    </span>
+                    <span className="text-[10px] font-medium text-rose-300/70">
+                      {currentMeta.role}
+                    </span>
+                  </div>
+
+                  {/* Content with mention badges */}
+                  <p className="min-w-0 break-words text-sm leading-relaxed text-rose-50 whitespace-pre-wrap sm:text-[14.5px]">
+                    {renderTextWithMentions(exchange.text)}
+                  </p>
+
+                  {/* Footer with OneSmarter Rose Double Checkmarks */}
+                  <div className="mt-2 flex items-center justify-end gap-1.5 text-[10px] text-rose-400/75">
+                    <span>Turn {exchangeIndex + 1}</span>
+                    <span>•</span>
+                    <span>{displayTime}</span>
+                    <CheckCheck
+                      className="inline h-3.5 w-3.5 text-rose-400"
+                      aria-label="Read receipt"
+                    />
+                  </div>
+                </div>
+
+                {/* Right Avatar */}
+                <div
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold shadow-md sm:h-9 sm:w-9 ${currentMeta.badgeColor}`}
+                  title={`${currentSpeakerName} (${currentMeta.role})`}
+                  aria-hidden="true"
+                >
+                  {currentMeta.initials}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Typing Indicator for Live Creation or Visitor Opinion response */}
+          {(isSending || currentlyTypingSpeaker) && (
+            <div className="flex items-end justify-start gap-2.5 sm:gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-500/30 bg-red-950/40 text-[10px] font-bold text-red-200 sm:h-9 sm:w-9">
+                AI
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl rounded-bl-xs border border-white/10 bg-[#16161c] px-4 py-3 text-xs text-zinc-300 shadow-md">
+                <span>
+                  {currentlyTypingSpeaker
+                    ? `${personaNames[currentlyTypingSpeaker] || currentlyTypingSpeaker} is speaking...`
+                    : sendingStatusText || `${speakerAName} and ${speakerBName} are discussing your opinion...`}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-red-500"></span>
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-red-500 [animation-delay:0.2s]"></span>
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-red-500 [animation-delay:0.4s]"></span>
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div ref={chatEndRef} />
+        </div>
+      </div>
+
+      {/* Interactive Opinion & @Agent Tagging Input Bar */}
+      <form
+        onSubmit={handleSendOpinion}
+        className="relative border-t border-white/10 bg-[#141418] p-3 sm:p-4"
+      >
+        {/* Floating Tag Popover Dropdown Menu */}
+        {showTagMenu && (
+          <div
+            ref={tagMenuRef}
+            className="absolute bottom-full left-3 right-3 z-30 mb-2 overflow-hidden rounded-xl border border-white/15 bg-[#181820] shadow-2xl backdrop-blur-md sm:left-4 sm:right-4 sm:max-w-md"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 bg-[#121216] px-3.5 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
+                <AtSign className="h-3.5 w-3.5 text-red-400" />
+                Select an agent to tag:
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowTagMenu(false)}
+                className="text-xs text-zinc-400 hover:text-white"
+                aria-label="Close tag menu"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="divide-y divide-white/5 p-1.5 max-h-60 overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => handleTagAgent("all")}
+                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-white/[0.08]"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-400/50 bg-red-600/30 text-[10px] font-bold text-red-200">
+                  ALL
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-semibold text-white">@all</p>
+                    <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-300 border border-red-500/30">
+                      All agents reply
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400">All Café agents join and reply</p>
+                </div>
+              </button>
+              {availableAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => handleTagAgent(agent.name)}
+                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-white/[0.08]"
+                >
+                  <span
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${agent.meta.badgeColor}`}
+                  >
+                    {agent.meta.initials}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold text-white">
+                        @{agent.name}
+                      </p>
+                      {agent.isAtTable && (
+                        <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-300 border border-red-500/30">
+                          At table
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-zinc-400 truncate">
+                      {agent.meta.role}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Tag Pills Row */}
+        <div className="flex flex-wrap items-center gap-1.5 pb-2.5">
+          <span className="flex items-center gap-1 text-[11px] font-medium text-zinc-400">
+            <AtSign className="h-3 w-3 text-red-400" />
+            <span>Tag:</span>
+          </span>
+          {availableAgents
+            .filter((a) => a.isAtTable)
+            .map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => handleTagAgent(agent.name)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-950/30 px-2.5 py-1 text-xs font-medium text-red-200 transition hover:border-red-400 hover:bg-red-900/40 hover:text-white"
+              >
+                <span
+                  className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${agent.meta.badgeColor}`}
+                >
+                  {agent.meta.initials}
+                </span>
+                <span>@{agent.name}</span>
+              </button>
+            ))}
+          <button
+            type="button"
+            onClick={() => handleTagAgent("all")}
+            className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-950/30 px-2.5 py-1 text-xs font-medium text-rose-200 transition hover:border-red-400 hover:bg-red-900/40 hover:text-white"
+          >
+            <span>@all</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTagMenu((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-zinc-400 transition hover:border-white/20 hover:text-zinc-200"
+          >
+            <span>@Choose agent...</span>
+          </button>
+          {isLiveCreating && (
+            <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-ping" />
+              Chatting live with agents
+            </span>
+          )}
+        </div>
+
+        {/* Main Input Row */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-600/20 text-[11px] font-bold text-red-300 shadow-sm"
+            title="Your seat at the table"
+          >
+            YOU
+          </span>
+          <div className="relative flex flex-1 items-center">
+            <input
+              ref={inputRef}
+              type="text"
+              value={visitorInput}
+              onChange={handleInputChange}
+              placeholder={
+                isLiveCreating
+                  ? `Jump in live! Tag @${speakerAName} or @${speakerBName}...`
+                  : `Type a message... tag @${speakerAName} or @${speakerBName}`
+              }
+              disabled={isSending}
+              maxLength={400}
+              className="w-full rounded-full border border-white/15 bg-[#181820] pl-4 pr-10 py-2.5 text-xs text-white placeholder:text-zinc-500 transition focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 sm:text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowTagMenu((prev) => !prev)}
+              title="Tag an agent (@)"
+              className="absolute right-3 flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white transition"
+            >
+              <AtSign className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <button
+            type="submit"
+            disabled={isSending || !visitorInput.trim()}
+            aria-label="Send your opinion to the table"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-950/50 transition hover:from-red-500 hover:to-rose-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isSending ? (
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+            ) : (
+              <Send className="h-4 w-4 text-white" />
+            )}
+          </button>
+        </div>
+        {replyError && (
+          <p className="mt-2 text-xs text-red-400">{replyError}</p>
+        )}
+      </form>
+
+      {/* Chat App Footer with OneSmarter Obsidian palette */}
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-[#101014] px-4 py-2 text-[11px] text-zinc-400 sm:px-6">
+        <span className="flex items-center gap-1.5">
+          <Coffee className="h-3.5 w-3.5 text-red-400" />
+          <span>Characters stay strictly in persona • Autonomous local AI</span>
+        </span>
+        <span className="font-medium text-zinc-400">
+          {localExchanges.length} messages
+        </span>
+      </footer>
     </article>
   );
 };
@@ -638,7 +1425,9 @@ const AiAgentsPage = () => {
   const [mode, setMode] = useState("question");
   const [cafeNow] = useState(() => new Date());
   const [viewedCafeConversationId, setViewedCafeConversationId] = useState("");
+  const [generatedCafeConversations, setGeneratedCafeConversations] = useState([]);
   const cafeTranscriptRef = useRef(null);
+
   const handleCafeSelection = (id) => {
     setViewedCafeConversationId(id);
     // Wait for React to render the selected transcript before positioning it.
@@ -650,6 +1439,19 @@ const AiAgentsPage = () => {
       });
     });
   };
+
+  const handleConversationGenerated = (newConversation) => {
+    setGeneratedCafeConversations((prev) => [newConversation, ...prev]);
+    setViewedCafeConversationId(newConversation.id);
+    requestAnimationFrame(() => {
+      cafeTranscriptRef.current?.focus({ preventScroll: true });
+      cafeTranscriptRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+        block: "start",
+      });
+    });
+  };
+
   const currentCafeConversation = selectCafeConversation(undefined, cafeNow);
   useEffect(() => {
     if (!currentCafeConversation || !isCafeConversationActive(cafeNow)) return undefined;
@@ -663,12 +1465,22 @@ const AiAgentsPage = () => {
     }).catch(() => requestedCafeRestorationEvents.delete(requestKey));
     return undefined;
   }, [cafeNow, currentCafeConversation]);
+
   const earlierPublishedCafeConversations = getEarlierCafeConversations(
     currentCafeConversation,
   );
-  const viewedCafeConversation = earlierPublishedCafeConversations.find(
-    (conversation) => conversation.id === viewedCafeConversationId,
-  ) || currentCafeConversation;
+
+  const allCafeConversations = [
+    ...generatedCafeConversations,
+    ...(currentCafeConversation ? [currentCafeConversation] : []),
+    ...earlierPublishedCafeConversations,
+  ];
+
+  const viewedCafeConversation =
+    allCafeConversations.find(
+      (conversation) => conversation.id === viewedCafeConversationId,
+    ) || generatedCafeConversations[0] || currentCafeConversation;
+
   const cafePersonaNames = Object.fromEntries(
     cafePersonas.map((persona) => [persona.id, persona.name]),
   );
@@ -709,6 +1521,15 @@ const AiAgentsPage = () => {
           <p className="mt-4 leading-7 text-zinc-300">
             These conversations are generated, not written, and nobody reviews them before they appear. The agents are given a small everyday subject and talk about it in character. Everything in them is invented — the incidents, the details, the people mentioned — and automated rules keep them away from our work, our customers, and anything real. They are here to show how the agents differ from each other, not as a record of anything that happened.
           </p>
+
+          <CafeConversationGenerator
+            onConversationGenerated={handleConversationGenerated}
+            generatedConversations={generatedCafeConversations}
+            activeConversationId={viewedCafeConversation?.id || ""}
+            onSelectConversation={handleCafeSelection}
+            currentWeeklyConversationId={currentCafeConversation?.id || ""}
+          />
+
           <div className="mt-8">
             <div id="cafe-selected-conversation" ref={cafeTranscriptRef} tabIndex={-1} className="scroll-mt-24 focus:outline-none">
               <CafeConversationTranscript

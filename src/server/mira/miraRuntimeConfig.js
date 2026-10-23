@@ -1,7 +1,7 @@
 import process from "node:process";
 
 const ALLOWED_MODES = new Set(["off", "mock", "staging_llm"]);
-const ALLOWED_PROVIDERS = new Set(["openai"]);
+const ALLOWED_PROVIDERS = new Set(["openai", "ollama"]);
 const ALLOWED_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high"]);
 const DEFAULT_MODE = "mock";
 const DEFAULT_REASONING_EFFORT = "minimal";
@@ -29,7 +29,8 @@ export const readMiraRuntimeConfig = (env = process.env) => {
   const mode = ALLOWED_MODES.has(requestedMode) ? requestedMode : DEFAULT_MODE;
   const requestedProvider = readString(env.MIRA_LLM_PROVIDER, "");
   const provider = requestedProvider.toLowerCase();
-  const model = readString(env.MIRA_LLM_MODEL, "");
+  const defaultModel = provider === "ollama" ? "qwen2.5:0.5b" : "";
+  const model = readString(env.MIRA_LLM_MODEL, defaultModel);
   const apiKey = readString(env.MIRA_LLM_API_KEY, "");
   const apiKeyConfigured = Boolean(apiKey);
   const providerWasValid = !provider || ALLOWED_PROVIDERS.has(provider);
@@ -37,9 +38,8 @@ export const readMiraRuntimeConfig = (env = process.env) => {
   const providerConfigComplete = Boolean(
     llmModeEnabled &&
       providerWasValid &&
-      provider === "openai" &&
-      model &&
-      apiKeyConfigured,
+      ((provider === "openai" && model && apiKeyConfigured) ||
+        (provider === "ollama" && model)),
   );
   const requestedReasoningEffort = readString(
     env.MIRA_LLM_REASONING_EFFORT,

@@ -15,10 +15,19 @@ Public website for OneSmarter, built with React and Vite.
 npm install
 npm run dev
 npm run build
+npm start
 npm run preview
 node scripts/generate-ai-search-files.js
 node generate-sitemap.js
 ```
+
+## Docker
+
+Build and run in production:
+```bash
+docker compose up --build -d
+```
+See [DOCKER.md](file:///c:/Onesmarter/Maintance/Onesmarter%20Website/New_OneSmarter_Website/DOCKER.md) for full instructions and options.
 
 ## Important Directories
 

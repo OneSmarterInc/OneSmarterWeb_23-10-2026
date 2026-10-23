@@ -11,7 +11,7 @@ export const readCafeOllamaConfig = (env = process.env) => {
   ) {
     throw new Error("Café Ollama endpoint must be a local loopback HTTP origin.");
   }
-  const model = (env.CAFE_OLLAMA_MODEL || "qwen3:4b").trim();
+  const model = (env.CAFE_OLLAMA_MODEL || "qwen2.5:0.5b").trim();
   if (!model || model.toLowerCase().includes("cloud")) {
     throw new Error("Café requires a local Ollama model; cloud models are not allowed.");
   }

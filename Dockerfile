@@ -1,0 +1,64 @@
+# ==========================================
+# Stage 1: Build the frontend & prepare assets
+# ==========================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies based on lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy project source files needed for build
+COPY index.html vite.config.js eslint.config.js ./
+COPY public ./public
+COPY src ./src
+COPY scripts ./scripts
+COPY cafe-data ./cafe-data
+
+# Build production bundle (includes prepare-cafe-content and vite build)
+RUN npm run build
+
+# ==========================================
+# Stage 2: Production runtime image
+# ==========================================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0
+
+# Install production dependencies only
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Copy prebuilt frontend assets from builder
+COPY --from=builder /app/dist ./dist
+
+# Copy prepared cafe data and snapshots from builder
+COPY --from=builder /app/src/data ./src/data
+
+# Copy backend handlers, server code, and supporting modules
+COPY --chown=node:node server.js ./
+COPY --chown=node:node api ./api
+COPY --chown=node:node src/server ./src/server
+COPY --chown=node:node cafe-data ./cafe-data
+COPY --chown=node:node scripts ./scripts
+
+# Set appropriate directory ownership for non-root node user
+RUN chown -R node:node /app
+
+# Switch to non-root user for security
+USER node
+
+# Expose web server port
+EXPOSE 3000
+
+# Container healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1
+
+# Start production server
+CMD ["node", "server.js"]

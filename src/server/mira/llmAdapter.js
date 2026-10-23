@@ -5,6 +5,7 @@ import {
 } from "../../data/agentKnowledge/miraLocalEngine.js";
 import { miraApprovedEvidence as onesmarterPublicKnowledgeBase, enrichMiraEvidence } from "./miraApprovedEvidence.js";
 import { runOpenAiMiraAdapter } from "./openAiAdapter.js";
+import { runOllamaMiraAdapter } from "./ollamaAdapter.js";
 import { resolveAgentIntent } from "../agentIntent/agentIntentResolver.js";
 import {
   applyMiraAdaptiveDiscovery,
@@ -1188,6 +1189,7 @@ const runMiraResponseAdapterInternal = async ({
   const isTrustPostureFaq = TRUST_POSTURE_FAQ_IDS.has(faqResolution?.faqId);
   if (
     faqResolution &&
+    config?.provider !== "ollama" &&
     (!hasExplicitSingleEntityFocus || isTrustPostureFaq) &&
     earlyRiskFlags.every((flag) =>
       ["hipaa_claim_boundary", "soc2_claim_boundary"].includes(flag),
@@ -2280,9 +2282,9 @@ const runMiraResponseAdapterInternal = async ({
 
   if (
     config?.mode === STAGING_LLM_MODE &&
-    config?.provider === "openai"
+    (config?.provider === "openai" || config?.provider === "ollama")
   ) {
-    if (localResult.responseMode.skipModel) {
+    if (localResult.responseMode.skipModel && config?.provider !== "ollama") {
       return {
         ...localResult,
         mode: LOCAL_HARNESS_MODE,
@@ -2423,7 +2425,7 @@ const runMiraResponseAdapterInternal = async ({
       handoffNeeded: normalizedHandoff.handoffNeeded,
       handoffReason: normalizedHandoff.handoffReason,
       suggestedFollowUps: modelOutput.suggestedFollowUps,
-      modelProvider: "openai",
+      modelProvider: config.provider || "openai",
       modelName: config.model,
       groundingStatus: modelOutput.groundingStatus,
       outputSafetyStatus: modelOutput.outputSafetyStatus,
@@ -2455,7 +2457,11 @@ const runMiraResponseAdapterInternal = async ({
 };
 
 export const runMiraResponseAdapter = async (options = {}) => {
-  const generationAdapter = options.openAiAdapter || runOpenAiMiraAdapter;
+  const generationAdapter =
+    options.openAiAdapter ||
+    (options.config?.provider === "ollama"
+      ? runOllamaMiraAdapter
+      : runOpenAiMiraAdapter);
   let generationAdapterCalls = 0;
   let generationMetadata;
   let semanticProviderCalls = 0;

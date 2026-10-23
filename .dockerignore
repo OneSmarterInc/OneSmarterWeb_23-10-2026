@@ -1,0 +1,38 @@
+# Dependency directories
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+build/
+.cache/
+
+# Git and IDE files
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+.agents/
+.gemini/
+
+# Environment files (inject at runtime, never bake into image)
+.env
+.env.local
+.env.*.local
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Test and coverage files
+coverage/
+*.lcov
+test-results/
+
+# Temporary / Log files
+*.log
+tmp/
+temp/
