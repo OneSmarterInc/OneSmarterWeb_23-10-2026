@@ -12,8 +12,7 @@ x-app: &app
     HOST: "0.0.0.0"
     NODE_OPTIONS: --max-old-space-size=256
   mem_limit: 384m
-  volumes:
-    - cafe_drafts:/app/src/data/cafeConversations/drafts
+
   healthcheck:
     test:
       - CMD
@@ -56,5 +55,4 @@ services:
         max-size: "10m"
         max-file: "3"
 
-volumes:
-  cafe_drafts:
+

@@ -231,13 +231,7 @@ export default async function handler(req, res) {
       status: "unpublished",
     };
 
-    try {
-      await fs.mkdir(draftsDirectory, { recursive: true });
-      const draftPath = path.join(draftsDirectory, `${draft.id}.json`);
-      await fs.writeFile(draftPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
-    } catch (saveError) {
-      console.warn("Could not save draft file to disk:", saveError.message);
-    }
+
 
     return res.status(200).json({
       success: true,

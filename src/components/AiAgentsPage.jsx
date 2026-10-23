@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatMiraAnswerBlocks as formatStructuredMiraAnswerBlocks } from "../data/agentPresentation/miraAnswerFormatter.js";
 import { cafePersonas } from "../data/agentPresentation/cafePersonas.js";
-import { getEarlierCafeConversations, getCafeWeekBucket, isCafeConversationActive, selectCafeConversation } from "../data/cafeConversations/index.js";
+import { getCafeWeekBucket, isCafeConversationActive, selectCafeConversation } from "../data/cafeConversations/index.js";
 import MiraPageReview from "./MiraPageReview.jsx";
 import CafeConversationGenerator from "./CafeConversationGenerator.jsx";
 import { Sparkles, CheckCheck, Coffee, Copy, Check, Send, Loader2, AtSign, Play, SkipForward } from "lucide-react";
@@ -784,6 +784,22 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
           </div>
         )}
 
+        {/* Empty state welcome card */}
+        {localExchanges.length === 0 && (
+          <div className="mx-auto my-8 max-w-md rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-center backdrop-blur-sm sm:p-8">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-red-500/30 bg-red-600/20 text-red-400 shadow-md">
+              <Coffee className="h-6 w-6" />
+            </div>
+            <h4 className="text-base font-semibold text-white">The table is open</h4>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-300">
+              {speakerAName} and {speakerBName} are seated at the table. Type your message below, tag an agent (@{speakerAName}, @{speakerBName}, or @all), and join the discussion live.
+            </p>
+            <p className="mt-3 text-[11px] text-zinc-500">
+              Conversations are live and session-only. Refreshing the website resets everything.
+            </p>
+          </div>
+        )}
+
         {/* Messages List: OneSmarter Obsidian & Crimson Alternating Bubbles */}
         <div
           className="space-y-4"
@@ -1158,7 +1174,7 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
           <span>Characters stay strictly in persona • Autonomous local AI</span>
         </span>
         <span className="font-medium text-zinc-400">
-          {localExchanges.length} messages
+          {localExchanges.length} {localExchanges.length === 1 ? "message" : "messages"}
         </span>
       </footer>
     </article>
@@ -1466,20 +1482,19 @@ const AiAgentsPage = () => {
     return undefined;
   }, [cafeNow, currentCafeConversation]);
 
-  const earlierPublishedCafeConversations = getEarlierCafeConversations(
-    currentCafeConversation,
+  const defaultLiveCafeConversation = useMemo(
+    () => ({
+      id: "live-cafe-table",
+      participants: currentCafeConversation?.participants || ["theo-mercer", "ravi-sen"],
+      seedTopic: currentCafeConversation?.seedTopic || "everyday observations and ideas",
+      exchanges: [],
+      status: "live",
+    }),
+    [currentCafeConversation],
   );
 
-  const allCafeConversations = [
-    ...generatedCafeConversations,
-    ...(currentCafeConversation ? [currentCafeConversation] : []),
-    ...earlierPublishedCafeConversations,
-  ];
-
   const viewedCafeConversation =
-    allCafeConversations.find(
-      (conversation) => conversation.id === viewedCafeConversationId,
-    ) || generatedCafeConversations[0] || currentCafeConversation;
+    generatedCafeConversations[0] || defaultLiveCafeConversation;
 
   const cafePersonaNames = Object.fromEntries(
     cafePersonas.map((persona) => [persona.id, persona.name]),
@@ -1537,42 +1552,6 @@ const AiAgentsPage = () => {
                 personaNames={cafePersonaNames}
               />
             </div>
-            {earlierPublishedCafeConversations.length > 0 && (
-              <details className="mt-6 rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-5 md:p-6">
-                <summary className="cursor-pointer font-semibold text-zinc-200">
-                  Earlier Café conversations
-                </summary>
-                <div className="mt-5 space-y-5">
-                  {earlierPublishedCafeConversations.map((conversation) => (
-                    <button
-                      key={conversation.id}
-                      type="button"
-                      onClick={() => handleCafeSelection(conversation.id)}
-                      aria-pressed={viewedCafeConversationId === conversation.id}
-                      aria-controls="cafe-selected-conversation"
-                      className={`block w-full rounded-lg border p-4 text-left text-sm font-semibold text-zinc-200 transition hover:border-white/25 hover:bg-white/[0.06] ${viewedCafeConversationId === conversation.id ? "border-red-400 bg-white/[0.06]" : "border-white/10 bg-black/30"}`}
-                    >
-                      View {conversation.participants
-                        .map((participantId) => cafePersonaNames[participantId])
-                        .join(" and ")}
-                      <span className="mt-2 block break-words font-normal leading-6 text-zinc-300">{conversation.seedTopic}</span>
-                      <time className="mt-1 block font-normal text-zinc-400" dateTime={conversation.conversationDay || conversation.publishedAt}>
-                        {new Date(`${conversation.conversationDay || conversation.publishedAt}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}
-                      </time>
-                    </button>
-                  ))}
-                  {viewedCafeConversationId && (
-                    <button
-                      type="button"
-                      onClick={() => handleCafeSelection("")}
-                      className="text-sm font-semibold text-red-300 underline-offset-4 hover:underline"
-                    >
-                      Return to this week&apos;s conversation
-                    </button>
-                  )}
-                </div>
-              </details>
-            )}
           </div>
         </div>
       </section>

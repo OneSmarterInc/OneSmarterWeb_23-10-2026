@@ -26,7 +26,7 @@ try {
   assert.match(html, /What to share with me/);
   assert.match(html, /What I can assess/);
   assert.match(html, /How I review/);
-  assert.match(html, /Earlier Café conversations/);
+  assert.doesNotMatch(html, /Earlier Café conversations/);
   assert.ok(html.includes("These conversations are generated, not written, and nobody reviews them before they appear. The agents are given a small everyday subject and talk about it in character. Everything in them is invented — the incidents, the details, the people mentioned — and automated rules keep them away from our work, our customers, and anything real. They are here to show how the agents differ from each other, not as a record of anything that happened."));
   assert.doesNotMatch(html, /<audio|<video|Open Theo|Open Elena|Open Ravi|Open Selene|first release boundary|capabilities we are building toward/i);
 
@@ -90,18 +90,8 @@ try {
     }
   }
   const cafeHtml = html.slice(html.indexOf('<section id="agent-cafe"'), html.indexOf('<section id="ai-agents-contact"'));
-  assert.equal((cafeHtml.match(/aria-pressed="false" aria-controls="cafe-selected-conversation"/g) || []).length, 32);
+  assert.equal((cafeHtml.match(/aria-controls="cafe-selected-conversation"/g) || []).length, 0, "No historical conversation buttons rendered");
   assert.match(cafeHtml, /id="cafe-selected-conversation"[^>]*tabindex="-1"[^>]*scroll-mt-24/);
-  assert.match(page, /onClick=\{\(\) => handleCafeSelection\(conversation.id\)\}/);
-  assert.match(page, /onClick=\{\(\) => handleCafeSelection\(""\)\}/);
-  assert.match(page, /aria-pressed=\{viewedCafeConversationId === conversation.id\}/);
-  assert.match(page, /viewedCafeConversationId === conversation.id \? "border-red-400 bg-white\/\[0.06\]"/);
-  const { getEarlierCafeConversations, selectCafeConversation } = await import("../src/data/cafeConversations/index.js");
-  for (const conversation of getEarlierCafeConversations(selectCafeConversation())) {
-    const topic = renderToStaticMarkup(React.createElement("span", null, conversation.seedTopic)).slice(6, -7);
-    assert.ok(cafeHtml.includes(topic), "Archive displays the exact existing topic");
-    assert.ok(cafeHtml.includes(`dateTime="${conversation.conversationDay || conversation.publishedAt}"`));
-  }
   // Execute the actual page handlers with a deferred request: no backend or DOM needed.
   for (const handlerName of ["handleQuestionClick", "handleCustomQuestionSubmit"]) {
     const handlerSource = page.match(new RegExp(`const ${handlerName} = (async [\\s\\S]*?\\n  });`))?.[1];

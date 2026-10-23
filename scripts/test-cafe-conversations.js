@@ -172,9 +172,8 @@ if (agentSource.includes("conversation.selection")) {
   fail("Selection provenance must remain internal and must not render publicly.");
 }
 if (
-  !agentSource.includes("Earlier Café conversations") ||
+  !agentSource.includes("The table is open") ||
   !agentSource.includes("invited {invitedParticipantName} to the Café") ||
-  !agentSource.includes("viewedCafeConversationId") ||
   !agentSource.includes("conversation={viewedCafeConversation}") ||
   !agentSource.includes("[cafeNow, currentCafeConversation]")
 ) {

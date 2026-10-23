@@ -412,55 +412,6 @@ const CafeConversationGenerator = ({
         </div>
       )}
 
-      {/* Session conversations quick switcher */}
-      {generatedConversations.length > 0 && (
-        <div className="mt-4 border-t border-white/10 pt-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              Chats generated in this session:
-            </p>
-            {activeConversationId !== currentWeeklyConversationId && (
-              <button
-                type="button"
-                onClick={() => onSelectConversation(currentWeeklyConversationId)}
-                className="text-xs font-semibold text-red-300 underline-offset-4 hover:underline"
-              >
-                Back to weekly conversation
-              </button>
-            )}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {generatedConversations.map((conv, idx) => {
-              const isActive = activeConversationId === conv.id;
-              const names = conv.participants
-                .map((pId) => cafePersonas.find((p) => p.id === pId)?.name || pId)
-                .join(" & ");
-
-              return (
-                <button
-                  key={conv.id}
-                  type="button"
-                  onClick={() => onSelectConversation(conv.id)}
-                  aria-pressed={isActive}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                    isActive
-                      ? "border-red-400 bg-red-950/40 text-red-100 ring-1 ring-red-400/40"
-                      : "border-white/15 bg-black/40 text-zinc-300 hover:border-white/30 hover:bg-white/[0.04]"
-                  }`}
-                >
-                  <Sparkles className="h-3 w-3 text-red-400" />
-                  <span>
-                    #{generatedConversations.length - idx}: {names}
-                  </span>
-                  <span className="text-[10px] text-zinc-400">
-                    ({conv.seedTopic ? conv.seedTopic.slice(0, 24) : "Coffee"}...)
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
