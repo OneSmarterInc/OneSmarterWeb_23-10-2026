@@ -1,3 +1,4 @@
+import { readCafeOllamaConfig } from "../../../scripts/lib/cafeOllama.js";
 import { cafePersonas } from "../../../src/data/agentPresentation/cafePersonas.js";
 import { sanitizeExchangeText } from "./generate.js";
 import {
@@ -601,12 +602,13 @@ Response:`;
   const timeoutId = setTimeout(() => controller.abort(), 3500);
 
   try {
-    const res = await fetch("http://127.0.0.1:11434/api/generate", {
+    const { baseUrl, model } = readCafeOllamaConfig();
+    const res = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
-        model: "qwen2.5:0.5b",
+        model,
         prompt,
         stream: false,
         options: { temperature: 0.65, num_predict: 60 },

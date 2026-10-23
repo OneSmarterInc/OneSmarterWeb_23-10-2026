@@ -5,11 +5,11 @@ export const readCafeOllamaConfig = (env = process.env) => {
   const baseUrl = new URL(env.CAFE_OLLAMA_BASE_URL || "http://127.0.0.1:11434");
   if (
     baseUrl.protocol !== "http:" ||
-    !["127.0.0.1", "[::1]", "localhost"].includes(baseUrl.hostname) ||
+    !["127.0.0.1", "[::1]", "localhost", "ollama"].includes(baseUrl.hostname) ||
     baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash ||
     baseUrl.pathname !== "/"
   ) {
-    throw new Error("Café Ollama endpoint must be a local loopback HTTP origin.");
+    throw new Error("Café Ollama endpoint must be a loopback HTTP origin or the private Docker host ollama.");
   }
   const model = (env.CAFE_OLLAMA_MODEL || "qwen2.5:0.5b").trim();
   if (!model || model.toLowerCase().includes("cloud")) {
