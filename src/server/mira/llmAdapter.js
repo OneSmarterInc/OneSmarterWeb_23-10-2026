@@ -1189,7 +1189,6 @@ const runMiraResponseAdapterInternal = async ({
   const isTrustPostureFaq = TRUST_POSTURE_FAQ_IDS.has(faqResolution?.faqId);
   if (
     faqResolution &&
-    config?.provider !== "ollama" &&
     (!hasExplicitSingleEntityFocus || isTrustPostureFaq) &&
     earlyRiskFlags.every((flag) =>
       ["hipaa_claim_boundary", "soc2_claim_boundary"].includes(flag),
@@ -2284,7 +2283,7 @@ const runMiraResponseAdapterInternal = async ({
     config?.mode === STAGING_LLM_MODE &&
     (config?.provider === "openai" || config?.provider === "ollama")
   ) {
-    if (localResult.responseMode.skipModel && config?.provider !== "ollama") {
+    if (localResult.responseMode.skipModel) {
       return {
         ...localResult,
         mode: LOCAL_HARNESS_MODE,

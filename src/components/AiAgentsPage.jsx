@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { formatMiraAnswerBlocks as formatStructuredMiraAnswerBlocks } from "../data/agentPresentation/miraAnswerFormatter.js";
 import { cafePersonas } from "../data/agentPresentation/cafePersonas.js";
 import { getCafeWeekBucket, isCafeConversationActive, selectCafeConversation } from "../data/cafeConversations/index.js";
+import { cafeSeedTopics } from "../data/cafeSeedTopics.js";
 import MiraPageReview from "./MiraPageReview.jsx";
 import CafeConversationGenerator from "./CafeConversationGenerator.jsx";
 import { Sparkles, CheckCheck, Coffee, Copy, Check, Send, Loader2, AtSign, Play, SkipForward } from "lucide-react";
@@ -412,6 +413,29 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
   const [replyError, setReplyError] = useState("");
   const [showTagMenu, setShowTagMenu] = useState(false);
 
+  // Preserve visitor-selected topic across session
+  const [activeTopic, setActiveTopic] = useState(() => {
+    try {
+      const saved =
+        typeof window !== "undefined"
+          ? window.sessionStorage?.getItem("cafe_session_topic")
+          : null;
+      return saved || conversation?.seedTopic || cafeSeedTopics[0];
+    } catch {
+      return conversation?.seedTopic || cafeSeedTopics[0];
+    }
+  });
+  const [customTopicInput, setCustomTopicInput] = useState("");
+
+  const handleSelectTopic = (newTopic) => {
+    if (!newTopic || !newTopic.trim()) return;
+    const trimmed = newTopic.trim();
+    setActiveTopic(trimmed);
+    try {
+      window.sessionStorage?.setItem("cafe_session_topic", trimmed);
+    } catch {}
+  };
+
   // Live creation / simulation state
   const [isLiveCreating, setIsLiveCreating] = useState(false);
   const [liveIndex, setLiveIndex] = useState(0);
@@ -601,21 +625,17 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
     };
 
     const lowerTrimmed = trimmed.toLowerCase();
-    let indicatorText = `${speakerAName} and ${speakerBName} are discussing your message...`;
-    if (/@(?:all|everyone|agents)\b/i.test(lowerTrimmed)) {
-      indicatorText = "All agents are preparing responses...";
-    } else {
-      const tagged = cafePersonas.filter(
-        (p) =>
-          lowerTrimmed.includes(`@${p.name.toLowerCase()}`) ||
-          lowerTrimmed.includes(`@${p.name.split(" ")[0].toLowerCase()}`) ||
-          lowerTrimmed.includes(`@${p.id.toLowerCase()}`),
-      );
-      if (tagged.length === 1) {
-        indicatorText = `${tagged[0].name} is replying...`;
-      } else if (tagged.length > 1) {
-        indicatorText = `${tagged.map((p) => p.name).join(" and ")} are replying...`;
-      }
+    let indicatorText = `${speakerAName.split(" ")[0]} is thinking…`;
+    const tagged = cafePersonas.filter(
+      (p) =>
+        lowerTrimmed.includes(`@${p.name.toLowerCase()}`) ||
+        lowerTrimmed.includes(`@${p.name.split(" ")[0].toLowerCase()}`) ||
+        lowerTrimmed.includes(`@${p.id.toLowerCase()}`),
+    );
+    if (tagged.length === 1) {
+      indicatorText = `${tagged[0].name.split(" ")[0]} is thinking…`;
+    } else if (tagged.length > 1) {
+      indicatorText = `${tagged.map((p) => p.name.split(" ")[0]).join(" and ")} are thinking…`;
     }
     setSendingStatusText(indicatorText);
 
@@ -630,7 +650,7 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           participantIds: conversation.participants || [speakerAId, speakerBId],
-          seedTopic: conversation.seedTopic || "everyday observations",
+          seedTopic: activeTopic || conversation.seedTopic || "everyday observations",
           recentExchanges: updatedList,
           visitorMessage: trimmed,
         }),
@@ -643,19 +663,42 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
         );
       }
 
-      const repliesWithTime = data.replies.map((reply, rIdx) => ({
-        ...reply,
-        liveTime: getLiveFormattedTime(new Date(Date.now() + (rIdx + 1) * 30000)),
-      }));
+      const replies = data.replies;
+      if (replies.length === 0) {
+        setIsSending(false);
+        setSendingStatusText("");
+        return;
+      }
 
-      setLocalExchanges((prev) => [...prev, ...repliesWithTime]);
-    } catch (err) {
+      // Display first reply as soon as it arrives
+      const arrivalTime1 = replies[0].timestamp
+        ? getLiveFormattedTime(new Date(replies[0].timestamp))
+        : getLiveFormattedTime(new Date());
+      setLocalExchanges((prev) => [...prev, { ...replies[0], liveTime: arrivalTime1 }]);
+
+      if (replies.length > 1) {
+        const nextSpeaker = replies[1].speaker;
+        const nextName = (personaNames[nextSpeaker] || nextSpeaker).split(" ")[0];
+        setSendingStatusText(`${nextName} is thinking…`);
+
+        setTimeout(() => {
+          const arrivalTime2 = replies[1].timestamp
+            ? getLiveFormattedTime(new Date(replies[1].timestamp))
+            : getLiveFormattedTime(new Date());
+          setLocalExchanges((prev) => [...prev, { ...replies[1], liveTime: arrivalTime2 }]);
+          setIsSending(false);
+          setSendingStatusText("");
+        }, 800);
+      } else {
+        setIsSending(false);
+        setSendingStatusText("");
+      }
+    } catch {
       setReplyError(
-        err.message ||
-          "Could not get agent response. Please check local Ollama.",
+        "The conversation paused for a moment while the table reflects. Please say something else or try again in a moment.",
       );
-    } finally {
       setIsSending(false);
+      setSendingStatusText("");
     }
   };
 
@@ -792,7 +835,7 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
             </div>
             <h4 className="text-base font-semibold text-white">The table is open</h4>
             <p className="mt-2 text-xs leading-relaxed text-zinc-300">
-              {speakerAName} and {speakerBName} are seated at the table. Type your message below, tag an agent (@{speakerAName}, @{speakerBName}, or @all), and join the discussion live.
+              {speakerAName} and {speakerBName} are seated at the table. Say something to the table below and join the discussion live.
             </p>
             <p className="mt-3 text-[11px] text-zinc-500">
               Conversations are live and session-only. Refreshing the website resets everything.
@@ -995,159 +1038,83 @@ const CafeConversationTranscript = ({ conversation, personaNames }) => {
         </div>
       </div>
 
-      {/* Interactive Opinion & @Agent Tagging Input Bar */}
+      {/* Interactive Opinion & Topic Selection Bar */}
       <form
         onSubmit={handleSendOpinion}
         className="relative border-t border-white/10 bg-[#141418] p-3 sm:p-4"
       >
-        {/* Floating Tag Popover Dropdown Menu */}
-        {showTagMenu && (
-          <div
-            ref={tagMenuRef}
-            className="absolute bottom-full left-3 right-3 z-30 mb-2 overflow-hidden rounded-xl border border-white/15 bg-[#181820] shadow-2xl backdrop-blur-md sm:left-4 sm:right-4 sm:max-w-md"
-          >
-            <div className="flex items-center justify-between border-b border-white/10 bg-[#121216] px-3.5 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
-                <AtSign className="h-3.5 w-3.5 text-red-400" />
-                Select an agent to tag:
-              </span>
+        {/* Topic Chips and Custom Topic Field */}
+        <div className="mb-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-zinc-400">Topics:</span>
+            {cafeSeedTopics.slice(0, 6).map((topic) => (
               <button
+                key={topic}
                 type="button"
-                onClick={() => setShowTagMenu(false)}
-                className="text-xs text-zinc-400 hover:text-white"
-                aria-label="Close tag menu"
+                onClick={() => handleSelectTopic(topic)}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  activeTopic === topic
+                    ? "border-red-500 bg-red-600/30 text-white shadow-sm"
+                    : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-white/25 hover:bg-white/[0.07]"
+                }`}
               >
-                ✕
-              </button>
-            </div>
-            <div className="divide-y divide-white/5 p-1.5 max-h-60 overflow-y-auto">
-              <button
-                type="button"
-                onClick={() => handleTagAgent("all")}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-white/[0.08]"
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-400/50 bg-red-600/30 text-[10px] font-bold text-red-200">
-                  ALL
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-semibold text-white">@all</p>
-                    <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-300 border border-red-500/30">
-                      All agents reply
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-zinc-400">All Café agents join and reply</p>
-                </div>
-              </button>
-              {availableAgents.map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  onClick={() => handleTagAgent(agent.name)}
-                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-white/[0.08]"
-                >
-                  <span
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${agent.meta.badgeColor}`}
-                  >
-                    {agent.meta.initials}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs font-semibold text-white">
-                        @{agent.name}
-                      </p>
-                      {agent.isAtTable && (
-                        <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-300 border border-red-500/30">
-                          At table
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-zinc-400 truncate">
-                      {agent.meta.role}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Quick Tag Pills Row */}
-        <div className="flex flex-wrap items-center gap-1.5 pb-2.5">
-          <span className="flex items-center gap-1 text-[11px] font-medium text-zinc-400">
-            <AtSign className="h-3 w-3 text-red-400" />
-            <span>Tag:</span>
-          </span>
-          {availableAgents
-            .filter((a) => a.isAtTable)
-            .map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                onClick={() => handleTagAgent(agent.name)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-950/30 px-2.5 py-1 text-xs font-medium text-red-200 transition hover:border-red-400 hover:bg-red-900/40 hover:text-white"
-              >
-                <span
-                  className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${agent.meta.badgeColor}`}
-                >
-                  {agent.meta.initials}
-                </span>
-                <span>@{agent.name}</span>
+                {topic}
               </button>
             ))}
-          <button
-            type="button"
-            onClick={() => handleTagAgent("all")}
-            className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-950/30 px-2.5 py-1 text-xs font-medium text-rose-200 transition hover:border-red-400 hover:bg-red-900/40 hover:text-white"
-          >
-            <span>@all</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowTagMenu((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-zinc-400 transition hover:border-white/20 hover:text-zinc-200"
-          >
-            <span>@Choose agent...</span>
-          </button>
-          {isLiveCreating && (
-            <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-ping" />
-              Chatting live with agents
-            </span>
-          )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="custom-topic-input" className="sr-only">
+              or suggest your own
+            </label>
+            <input
+              id="custom-topic-input"
+              type="text"
+              value={customTopicInput}
+              onChange={(e) => setCustomTopicInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSelectTopic(customTopicInput);
+                  setCustomTopicInput("");
+                }
+              }}
+              placeholder="or suggest your own"
+              aria-label="or suggest your own"
+              className="w-full max-w-xs rounded-full border border-white/15 bg-[#181820] px-3.5 py-1.5 text-xs text-white placeholder:text-zinc-500 transition focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 sm:w-64"
+            />
+            {customTopicInput.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleSelectTopic(customTopicInput);
+                  setCustomTopicInput("");
+                }}
+                className="rounded-full border border-red-500/40 bg-red-600/20 px-3 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-600/30"
+              >
+                Set topic
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Main Input Row */}
+        {/* Main Input Row: Single Message Box labelled Say something to the table. */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-500/40 bg-red-600/20 text-[11px] font-bold text-red-300 shadow-sm"
-            title="Your seat at the table"
-          >
-            YOU
-          </span>
+          <label htmlFor="cafe-table-message" className="sr-only">
+            Say something to the table.
+          </label>
           <div className="relative flex flex-1 items-center">
             <input
+              id="cafe-table-message"
               ref={inputRef}
               type="text"
               value={visitorInput}
-              onChange={handleInputChange}
-              placeholder={
-                isLiveCreating
-                  ? `Jump in live! Tag @${speakerAName} or @${speakerBName}...`
-                  : `Type a message... tag @${speakerAName} or @${speakerBName}`
-              }
+              onChange={(e) => setVisitorInput(e.target.value)}
+              placeholder="Say something to the table."
+              aria-label="Say something to the table."
               disabled={isSending}
               maxLength={400}
-              className="w-full rounded-full border border-white/15 bg-[#181820] pl-4 pr-10 py-2.5 text-xs text-white placeholder:text-zinc-500 transition focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 sm:text-sm"
+              className="w-full rounded-full border border-white/15 bg-[#181820] px-4 py-2.5 text-xs text-white placeholder:text-zinc-400 transition focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 sm:text-sm"
             />
-            <button
-              type="button"
-              onClick={() => setShowTagMenu((prev) => !prev)}
-              title="Tag an agent (@)"
-              className="absolute right-3 flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white transition"
-            >
-              <AtSign className="h-3.5 w-3.5" />
-            </button>
           </div>
           <button
             type="submit"

@@ -53,7 +53,7 @@ const substantiveTokens = (value) => normalize(value).split(" ")
   .map(stem)
   .filter((token) => token.length >= 3);
 
-const namedEntities = (sentence) => {
+export const namedEntities = (sentence) => {
   const words = [...String(sentence).matchAll(/\b(?:[A-Z]{2,}(?:\/[A-Z]+)?|[A-Za-z]*[a-z][A-Z][A-Za-z]*|[A-Z][a-z]{2,}|\d[\d.-]{2,})\b/g)]
     .map((match) => normalize(match[0]));
   return [...new Set(words.filter((word) => !SAFE_ENTITIES.has(word) && !STOP_WORDS.has(word)))];

@@ -11,6 +11,7 @@ import { cafeSeedTopics } from "../src/data/cafeSeedTopics.js";
 import { publishedCafeConversations } from "../src/data/cafeConversations/index.js";
 import { generateCafeWithOllama } from "./lib/cafeOllama.js";
 import { validDay } from "./prepare-cafe-content.js";
+import { checkCafeSafety } from "../src/data/cafeConversations/cafeSafetyGuard.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MIN_EXCHANGES = 6;
@@ -222,24 +223,17 @@ export const buildCafeGenerationPrompt = ({
     "Participant profiles (complete data):",
     JSON.stringify(participants, null, 2),
     "",
-    "Identity and conversational voice:",
-    "Both participants are AI agents having a professional but relaxed off-duty discussion, not humans acting out a scene. Let their agent identity be apparent naturally, without repeating 'as an AI' or turning the conversation into a disclaimer.",
-    "In the first exchange, explicitly refer to your shared identity as AI agents while opening a question or possibility about the topic. Make this a brief part of the conversation, not a greeting or disclaimer. Neither participant has personally witnessed the topic or received any evidence beyond this prompt.",
-    "Use their different agent perspectives to explore the ordinary topic: Theo notices evidence and precise wording; Elena notices claims, assumptions, and boundaries; Ravi considers practical steps and what might go wrong; Selene asks how parts and perspectives fit together. These are habits of thought, not permission to discuss work, customers, or internal systems.",
-    "Respect each selected persona's disposition, interests, and speaking habits. Give both a meaningful contribution without forcing equal airtime or making reserved participants unusually talkative.",
-    "Write natural back-and-forth: respond to the previous remark, ask a curious question, offer a different angle, or gently disagree. Prefer short, concrete sentences and varied turns over consecutive monologues or repeated agreement.",
-    "Keep the tone professional, warm, and conversational. Avoid audit-report language, compliance documents, findings, recommendations, bullet lists, summaries, marketing language, and formal closing conclusions.",
-    "Treat the profiles' human biographies as fictional persona context only. Do not claim lived memories, family experiences, eating, travel, physical actions, real-world observation, or independent access to data. If a constructed background is relevant, explicitly describe it as constructed rather than a real experience.",
-    "Do not invent statistics, research, citations, news events, customers, experiments, tests, or results. Do not turn a seed topic into a claim that an event actually happened. Use only supplied factual details; explore other ideas as clearly framed possibilities, questions, or opinions rather than unsupported facts.",
-    "The seed topic is a discussion idea, not a factual account. Open with a question or possibility about it. If you introduce an illustrative detail, imagined rule, quotation, note, person, or scenario, explicitly label it hypothetical in that same turn using wording such as 'suppose', 'imagine', or 'what if'. Never imply you found, read, noticed, tested, or observed something that was not supplied. Do not assert what people usually do or call an invented example real, classic, common, or proven.",
-    "Keep observations about people and the world as questions or possibilities too: say what someone might do in the imagined scenario, not what players, readers, or people generally do. Stay with this small idea instead of making broad claims.",
-    "Style demonstration only, on an unrelated topic; do not copy its subject or wording into your dialogue:",
-    "Agent A: 'As agents, would we read an imaginary sign saying “almost open” the same way? I'd want to know what “almost” means.'",
-    "Agent B: 'I'd be tempted to ask the sign to commit. Could it mean opening soon, or just a door left slightly ajar?'",
-    "Agent A: 'The second reading hadn't occurred to me. What extra word would settle it?'",
-    "Follow that pattern: a clearly imagined idea, different perspectives, curiosity, and direct replies. Keep each turn to one or two short sentences. Stay entirely within the imagined discussion; leave biographies, memories, named real examples, and claims of personal experience out of the dialogue.",
-    "Before returning JSON, check that each turn sounds like a reply from a distinct AI agent, stays on the supplied topic, and contains no invented evidence or human experience. Return only the dialogue JSON, not this check.",
-  ].join("\n");
+    "Dialogue and character direction:",
+    "Write a natural, dry, intelligent, and engaging conversation between friends having coffee, matching the style of cafe-2026-08-19-theo-elena-cooking-programme.js.",
+    "Do not include AI disclaimers, do not say 'as an AI', and do not refer to prompts, models, or corporate agent roles.",
+    "Do not discuss work, OneSmarter, platforms, clients, or compliance.",
+    "Turn order should vary naturally rather than strictly alternating, but both participants must speak.",
+    ...(participants.some((p) => p.id === "theo-mercer")
+      ? ["Keep Theo Mercer's contributions short (often just a few words) and relatively infrequent, without equal conversational airtime by default."]
+      : []),
+    "Respond to the previous remark naturally with curiosity, gentle teasing, dry humor, or a different angle.",
+    "Keep each turn to 1 or 2 concise, concrete sentences.",
+  ].filter(Boolean).join("\n");
 };
 
 export const parseCafeModelOutput = (outputText, { participantIds, exchangeCount }) => {
@@ -290,10 +284,21 @@ export const buildCafeDraft = ({
   selection,
   model = "qwen2.5:0.5b",
 }) => {
-  if (conversationDay !== undefined && !validDay(conversationDay)) throw new Error("Invalid Cafe conversation day.");
+  const today = new Date().toISOString().slice(0, 10);
+  if (conversationDay !== undefined) {
+    if (!validDay(conversationDay)) throw new Error("Invalid Cafe conversation day.");
+    if (conversationDay > today) throw new Error("Café conversationDay cannot be a future date.");
+  }
   const draftId = `cafe-draft-${randomUUID()}`;
   const generatedAt = new Date().toISOString();
-  const content = { participants: participantIds, seedTopic, conversationDay, invitedBy, exchanges, selection };
+  const content = {
+    participants: participantIds,
+    seedTopic,
+    conversationDay,
+    invitedBy,
+    exchanges,
+    selection,
+  };
   return {
     id: draftId,
     draftId,
@@ -314,7 +319,11 @@ export const generateConversation = async ({
   invitedBy,
   selection,
 }, { env = process.env, outputDirectory = draftDirectory } = {}) => {
-  if (conversationDay !== undefined && !validDay(conversationDay)) throw new Error("Invalid Cafe conversation day.");
+  const today = new Date().toISOString().slice(0, 10);
+  if (conversationDay !== undefined) {
+    if (!validDay(conversationDay)) throw new Error("Invalid Cafe conversation day.");
+    if (conversationDay > today) throw new Error("Café conversationDay cannot be a future date.");
+  }
   const prompt = buildCafeGenerationPrompt({ participantIds, seedTopic, exchangeCount });
   const response = await generateCafeWithOllama({
     prompt,
@@ -342,6 +351,17 @@ export const generateConversation = async ({
     },
   });
   const generated = parseCafeModelOutput(response.content, { participantIds, exchangeCount });
+
+  // Validate every exchange through cafe safety guard
+  for (const exchange of generated.exchanges) {
+    const safety = checkCafeSafety(exchange.text);
+    if (!safety.isSafe) {
+      throw new Error(`Generated exchange violated safety guardrail (${safety.category}): ${safety.reason}`);
+    }
+    if (/\b(?:as an ai|language model|ai agent|system prompt)\b/i.test(exchange.text)) {
+      throw new Error("Generated exchange leaked AI identity or prompt instructions.");
+    }
+  }
 
   const draft = buildCafeDraft({
     participantIds,
